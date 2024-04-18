@@ -48,7 +48,7 @@ int main(int argc, char **argv)
         tmp = hand;
         while(tmp)
         {
-            if((!strcmp(tmp->name, str2)) || (tmp->id == atoi(str)))
+            if((!strncmp(tmp->name, str2, strlen(tmp->name))) || (tmp->id == atoi(str)))
             {
                 getfile(tmp->name);
                 break;

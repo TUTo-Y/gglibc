@@ -64,7 +64,11 @@ int getdatafromcurl(const char *url, mem *data)
     data->size = 0;
     
     // 初始化curl
-    curl = curl_easy_init();
+    if(!(curl = curl_easy_init()))
+    {
+        FREE(*data);
+        return -1;
+    }
     // 设置URL
     curl_easy_setopt(curl, CURLOPT_URL, url);
     // 设置回调函数
@@ -84,6 +88,7 @@ int getdatafromcurl(const char *url, mem *data)
     {
         // 清除curl
         curl_easy_cleanup(curl);
+        FREE(*data);
         fprintf(stderr, "\n下载%s错误!\n", url);
         return -1;
     }
@@ -113,7 +118,8 @@ int gz(const char *inData, const size_t inLen, char **outData, size_t *outLen)
     infstream.avail_out = (uInt)*outLen;        // 解压的数据块大小
     infstream.next_out  = (Bytef *)*outData;    // 解压的数据块
 
-    inflateInit2(&infstream, 16 + MAX_WBITS);
+    if(inflateInit2(&infstream, 16 + MAX_WBITS) != Z_OK)
+        return -1;
 
     while (infstream.avail_in)
     {
@@ -148,13 +154,17 @@ int getdatafromtar(const char *filename, const char *inData, const size_t inLen,
     size_t offset = 0;
     int len = 0, len_old = 0;
     // 初始化archive
-    a = archive_read_new();
+    if(!(a = archive_read_new()))
+        return -1;
     archive_read_support_filter_all(a);
     archive_read_support_format_all(a);
 
     // 读取数据
     if (archive_read_open_memory(a, inData, inLen) != ARCHIVE_OK)
+    {
+        archive_read_free(a);
         return -1;
+    }
 
     // 获取归档文件条目
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK)
@@ -174,6 +184,7 @@ int getdatafromtar(const char *filename, const char *inData, const size_t inLen,
                 if (new_data == NULL)
                 {
                     free(*outData);
+                    archive_read_free(a);
                     return -1;
                 }
                 *outData = new_data;
@@ -182,6 +193,7 @@ int getdatafromtar(const char *filename, const char *inData, const size_t inLen,
             if (len < 0)
             {
                 free(*outData);
+                archive_read_free(a);
                 return -1;
             }
             *outLen -= MEM_ADD_SIZE - len_old;
@@ -193,7 +205,11 @@ int getdatafromtar(const char *filename, const char *inData, const size_t inLen,
 
     // 清除archive
     if (archive_read_free(a) != ARCHIVE_OK)
+    {
+        if(*outData != NULL)
+            free(*outData);
         return -1;
+    }
     return 0;
 }
 
@@ -223,13 +239,23 @@ int getnamefromtar(const char *inData, const size_t inLen, mem *file, mem *dir)
     dir->size  = 0x10;
 
     // 初始化archive
-    a = archive_read_new();
+    if(!(a = archive_read_new()))
+    {
+        free(file->data);
+        free(dir->data);
+        return -1;
+    }
     archive_read_support_filter_all(a);
     archive_read_support_format_all(a);
 
     // 读取数据
     if (archive_read_open_memory(a, inData, inLen) != ARCHIVE_OK)
+    {
+        free(file->data);
+        free(dir->data);
+        archive_read_free(a);
         return -1;
+    }
 
     // 获取归档文件条目
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK)
@@ -248,9 +274,13 @@ int getnamefromtar(const char *inData, const size_t inLen, mem *file, mem *dir)
 
     // 清除archive
     if (archive_read_free(a) != ARCHIVE_OK)
+    {
+        free(file->data);
+        free(dir->data);
         return -1;
+    }
+
     return 0;
-    
 }
 
 void readlist(list **l, FILE *file)
@@ -291,13 +321,21 @@ int getfilefromtar(const char *post, const char *dir, const char *inData, const 
     char filename[256] = { 0 };
 
     // 初始化archive
-    a = archive_read_new();
+    if(!(a = archive_read_new()))
+    {
+        free(outData);
+        return -1;
+    }
     archive_read_support_filter_all(a);
     archive_read_support_format_all(a);
 
     // 读取数据
     if (archive_read_open_memory(a, inData, inLen) != ARCHIVE_OK)
+    {
+        free(outData);
+        archive_read_free(a);
         return -1;
+    }
 
     // 获取归档文件条目
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK)
@@ -314,6 +352,8 @@ int getfilefromtar(const char *post, const char *dir, const char *inData, const 
             if(!file)
             {
                 printf("创建文件失败:%s\n", filename);
+                free(outData);
+                archive_read_free(a);
                 break;
             }
             // 获取数据
@@ -321,8 +361,10 @@ int getfilefromtar(const char *post, const char *dir, const char *inData, const 
                 fwrite(outData, 1, len, file);
             if (len < 0)
             {
-                archive_read_free(a);
+                fclose(file);
+                remove(filename);
                 free(outData);
+                archive_read_free(a);
                 return -1;
             }
             // 文件为空
@@ -390,7 +432,12 @@ int getfile(const char *name)
     printf("成功获取文件\n");
 
     // 获取deb条目
-    getnamefromtar(deb.data, deb.size, &f, &d);
+    if(getnamefromtar(deb.data, deb.size, &f, &d) < 0)
+    {
+        perror("获取文件条目失败!\n");
+        FREE(deb);
+        return -1;
+    }
     for(int i = 0; i<f.size; i++)
     {
         if(!strncmp(((char**)f.data)[i], "data", 4))

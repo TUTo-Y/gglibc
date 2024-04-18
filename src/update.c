@@ -26,7 +26,7 @@ void writetolist(FILE*file, const char *str)
         q = strstr(p, ".deb");
         if((!strncmp(q - 5, "amd64", 5)) || (!strncmp(q - 4, "i386", 4)))
         {
-            fprintf(file, "[%3d ] ", n++);
+            fprintf(file, "[%3d ] ", ++n);
             fwrite(p, 1, q - p, file);
             fputc('\n', file);
         }
@@ -44,6 +44,7 @@ int main()
 
     
     Init();
+    
     // 获取ls_lR.gz文件
     printf("正在获取文件:%s\n", LS);
     if(getdatafromcurl(LS, &ls_data))
