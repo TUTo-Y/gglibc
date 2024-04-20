@@ -1,0 +1,27 @@
+{
+    "files.associations": {
+        "stdio.h": "c",
+        "file.h": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c",
+        "sstream": "c",
+        "initializer_list": "c",
+        "utility": "c",
+        "dir.h": "c",
+        "math.h": "c",
+        "string.h": "c",
+        "color.h": "c",
+        "data.h": "c",
+        "typeinfo": "c",
+        "chardet.h": "c",
+        "archive_entry.h": "c",
+        "curl.h": "c",
+        "version.h": "c",
+        "unistd.h": "c",
+        "chardet-config.h": "c",
+        "stdlib.h": "c",
+        "archive.h": "c"
+    },
+    "C_Cpp.errorSquiggles": "disabled"
+}

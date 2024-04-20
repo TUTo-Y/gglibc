@@ -21,18 +21,5 @@
 make
 ```
 
-编译完成后运行`./update`可以更新glibc列表
-然后使用`./get`获取glibc对应的版本
-如:
-```sh
-./get
-```
-```sh
-./get all
-```
-```sh
-./get libc6_2.27-3ubuntu1.6_amd64
-```
-```sh
-./get 6
-```
+编译完成后运行 `./gglibc update` `./gglibc u` `./gglibc -u`可以更新glibc列表
+然后使用`./gglibc`获取glibc对应的版本

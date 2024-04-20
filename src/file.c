@@ -1,76 +1,173 @@
-#include "file.h"
+#include <file.h>
 
-void Init()
-{
-    // 初始化libcurl
-    curl_global_init(CURL_GLOBAL_ALL);
-}
-void Quit()
-{
-    // 退出libcurl
-    curl_global_cleanup();
-}
-
-// 进度条回调函数
-void processcallback(const char *msg, size_t total, size_t now)
-{
-    int part1, part2;
-    
-    part1 =  (int)round((((double)now)/((double)total)) * PROCESS_N);
-    part2 = PROCESS_N - part1;
-    
-    printf("\r%s[", msg);
-    while(part1--)
-        putchar('#');
-    while(part2--)
-        putchar(' ');
-    putchar(']');
-    fflush(stdout);
-}
-
-size_t dprocesscallback(void *p, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow)
-{
-    if(dltotal)
-        processcallback("下载ing : ", (size_t)dltotal, (size_t)dlnow);
-    return 0;
-}
-
+/**
+ * \brief 读取数据回调函数
+ * \param data 数据
+ * \param size 大小
+ * \param n    数量
+ * \param m    mem
+ * \return 读取的大小
+ */
 size_t readcallback(void *data, size_t size, size_t n, void *m)
 {
-    mem    *memory   = (mem *)m;
-    size_t  realsize = size * n;
+    struct mem *memory = (struct mem *)m;
+    size_t realsize = size * n;
     // 重新申请内存
-    memory->data = (char*)realloc(memory->data, memory->size + realsize + 1);
+    memory->data = (char *)realloc(memory->data, memory->size + realsize);
+    if (memory->data == NULL)
+    {
+        fprintf(stderr, BRED("\n致命错误：重新申请 0x%lx 字节内存时，内存分配失败!\n"), memory->size + realsize);
+        exit(-1);
+    }
     // 将数据拷贝到内存中
-    memcpy(((char*)memory->data) + memory->size, data, realsize);
-    // 设置文件末
-    ((char*)memory->data)[memory->size + realsize] = 0;
+    memcpy(((char *)memory->data) + memory->size, data, realsize);
     // 设置新的内存大小
     memory->size += realsize;
 
     return realsize;
 }
 
-int getdatafromcurl(const char *url, mem *data)
+/**
+ * /brief 进度条回调函数
+ * /param msg   消息
+ * /param total 总大小
+ * /param now   当前大小
+ * /param msg_color 消息颜色
+ * /param bar_color 进度条颜色
+ * /return 无
+ */
+void processcallback(const char *msg, size_t total, size_t now, const char *msg_color, const char *bar_color)
 {
-    CURL *curl  = NULL; // URL信息
+    int part1, part2;
 
-    // 检测参数
-    if(!(url && data))
-        return -1;
+    part1 = (int)round((((double)now) / ((double)total)) * PROCESS_N);
+    part2 = PROCESS_N - part1;
+
+    printf("\r%s%s%s[", msg_color, msg, bar_color); // 输出消息
+    while (part1--)
+        putchar('#'); // 输出进度条已完成部分
+    while (part2--)
+        putchar(' ');     // 输出进度条未完成部分
+    printf("]%s", RESET); // 重置颜色
+
+    fflush(stdout); // 刷新输出
+}
+
+size_t dprocesscallback(void *p, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow)
+{
+    if (dltotal)
+        processcallback("正在下载 : ", (size_t)dltotal, (size_t)dlnow, _BMAG, _BYEL);
+    return 0;
+}
+
+/**
+ * \brief 解压缩一个gz文件
+ * \param min   输入数据
+ * \param mout  输出数据
+ * \return 成功返回true，失败返回false
+*/
+bool gz(const struct mem *min, struct mem *mout)
+{
+    z_stream strm;
+
+    // 分配初始输出缓冲区
+    mout->size = min->size;
+    mout->data = (char *)MALLOC(mout->size);
+
+    // 初始化zlib
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+    strm.avail_in = (uInt)min->size;     // 剩余未解压的数据大小
+    strm.next_in = (Bytef *)min->data;   // 未解压的数据
+    strm.avail_out = (uInt)mout->size;   // 解压的数据块大小
+    strm.next_out = (Bytef *)mout->data; // 解压的数据块
+
+    // 初始化解压缩
+    if (inflateInit2(&strm, 32 + MAX_WBITS) != Z_OK)
+    {
+        fprintf(stderr, BRED("初始化zlib时失败"));
+        return false;
+    }
+
+    while (strm.avail_in)
+    {
+        // 如果输出缓冲区不够大，就扩大它
+        if (strm.total_out >= mout->size)
+        {
+            mout->size += MEM_ADD_SIZE;
+            mout->data = (BYTE *)realloc(mout->data, mout->size);
+            if (mout->data == NULL)
+            {
+                fprintf(stderr, BRED("解压时出现错误 : 申请 0x%lx 字节内存时，内存分配失败!\n"), mout->size);
+                inflateEnd(&strm);
+                return false;
+            }
+        }
+
+        strm.avail_out = mout->size - strm.total_out;
+        strm.next_out = (Bytef *)(mout->data + strm.total_out);
+
+        // 解压缩
+        int ret = inflate(&strm, Z_NO_FLUSH);
+        processcallback("正在解压 : ", (size_t)min->size, (size_t)(min->size - strm.avail_in), _BMAG, _BYEL);
+
+        if (ret == Z_STREAM_END)
+            break;
+        if (ret != Z_OK)
+        {
+            fprintf(stderr, BRED("解压时出现错误 : %s\n"), zError(ret));
+            inflateEnd(&strm);
+            FREE(*mout);
+            return false;
+        }
+    }
+    mout->size = strm.total_out;
+    processcallback("解压完成 : ", 1, 1, _BGRN, _GRN);
+    putchar('\n');
+
+    // 清理并返回
+    inflateEnd(&strm);
+    return true;
+}
+
+/**
+ * \brief 通过CURL获取文件数据
+ * \param url  文件URL
+ * \param data 文件数据
+ * \return 成功返回true，失败返回false
+*/
+bool getdatafromcurl(const char *url, struct mem *data)
+{
+    CURL *curl = NULL; // URL信息
+    CURLcode res;
+
+    // 检测参数不能为空
+    if (!(url && data))
+        return false;
 
     // 初始化内存空间
-    data->data = malloc(0);
+    data->data = MALLOC(0);
     data->size = 0;
-    
+
     // 初始化curl
-    if(!(curl = curl_easy_init()))
+    if (!(curl = curl_easy_init()))
     {
+        fprintf(stderr, BRED("初始化CURL时出现错误!\n"));
         FREE(*data);
-        return -1;
+        return false;
     }
+
     // 设置URL
-    curl_easy_setopt(curl, CURLOPT_URL, url);
+    res = curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (res != CURLE_OK)
+    {
+        fprintf(stderr, BRED("设置CURL时出现错误: %s\n"),
+                curl_easy_strerror(res));
+        curl_easy_cleanup(curl);
+        FREE(*data);
+        return false;
+    }
     // 设置回调函数
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, readcallback);
     // 设置调用的指针
@@ -83,399 +180,174 @@ int getdatafromcurl(const char *url, mem *data)
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, dprocesscallback);
     // 设置进度条调用指针
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &curl);
-    // 获取文件
-    if(curl_easy_perform(curl) != CURLE_OK)
+    if (curl_easy_perform(curl) != CURLE_OK)
     {
+        fprintf(stderr, BRED("\n下载%s错误!\n"), url);
         // 清除curl
         curl_easy_cleanup(curl);
         FREE(*data);
-        fprintf(stderr, "\n下载%s错误!\n", url);
-        return -1;
+        return false;
     }
+
+    // 打印进度条
+    processcallback("下载完成 : ", 1, 1, _BGRN, _GRN);
+    putchar('\n');
 
     // 清除curl
     curl_easy_cleanup(curl);
-    putchar('\n');
-    return 0;
+    return true;
 }
 
-int gz(const char *inData, const size_t inLen, char **outData, size_t *outLen)
+/**
+ * \brief 从归档文件中获取所有目录和文件
+ * \param data 归档文件数据
+ * \param dir  目录
+ * \param file 文件
+ * \return 成功返回目录和文件的数量，失败返回-1
+ */
+int getpathfromarchive(const struct mem *data, struct string **dir, struct string **file)
 {
-    z_stream infstream;
+    size_t count = 0;
+    struct archive *a = NULL;
+    struct archive_entry *entry = NULL;
 
-    // 是否提前分配内存
-    if(*outData == NULL)
+    // 初始化
+    a = archive_read_new();
+    if (!a)
     {
-        *outLen = MEM_INIT_SIZE;
-        *outData = (char *)malloc(*outLen);
-    }
-
-    infstream.zalloc    = Z_NULL;
-    infstream.zfree     = Z_NULL;
-    infstream.opaque    = Z_NULL;
-    infstream.avail_in  = (uInt)inLen;          // 剩余未解压的数据大小
-    infstream.next_in   = (Bytef *)inData;      // 未解压的数据
-    infstream.avail_out = (uInt)*outLen;        // 解压的数据块大小
-    infstream.next_out  = (Bytef *)*outData;    // 解压的数据块
-
-    if(inflateInit2(&infstream, 16 + MAX_WBITS) != Z_OK)
-        return -1;
-
-    while (infstream.avail_in)
-    {
-        // 如果解压的数据块不够大，重新分配内存
-        if (infstream.avail_out == 0)
-        {
-            *outLen += MEM_ADD_SIZE;
-            *outData = (char *)realloc(*outData, *outLen);
-            infstream.next_out = (Bytef *)(*outData + *outLen - MEM_ADD_SIZE);
-            infstream.avail_out = (uInt)MEM_ADD_SIZE;
-        }
-
-        // 解压数据
-        if(inflate(&infstream, Z_NO_FLUSH) < Z_OK)
-        {
-            inflateEnd(&infstream);
-            return -1;
-        }
-        processcallback("解压ing : ", inLen, inLen-infstream.avail_in);
-    }
-    *outLen = infstream.total_out;
-
-    inflateEnd(&infstream);
-    putchar('\n');
-    return 0;
-}
-
-int getdatafromtar(const char *filename, const char *inData, const size_t inLen, char **outData, size_t *outLen)
-{
-    struct archive *a;
-    struct archive_entry *entry;
-    size_t offset = 0;
-    int len = 0, len_old = 0;
-    // 初始化archive
-    if(!(a = archive_read_new()))
-        return -1;
-    archive_read_support_filter_all(a);
-    archive_read_support_format_all(a);
-
-    // 读取数据
-    if (archive_read_open_memory(a, inData, inLen) != ARCHIVE_OK)
-    {
-        archive_read_free(a);
-        return -1;
-    }
-
-    // 获取归档文件条目
-    while (archive_read_next_header(a, &entry) == ARCHIVE_OK)
-    {
-        // 匹配成功
-        if(!strcmp(filename, archive_entry_pathname(entry)))
-        {
-            *outLen = MEM_INIT_SIZE;
-            *outData = (char *)malloc(*outLen);
-            if (*outData == NULL)
-                return -1;
-            // 解压
-            while((len = archive_read_data(a, *outData + *outLen - MEM_ADD_SIZE, MEM_ADD_SIZE)) > 0)
-            {
-                *outLen += MEM_ADD_SIZE;
-                char *new_data = (char *)realloc(*outData, *outLen);
-                if (new_data == NULL)
-                {
-                    free(*outData);
-                    archive_read_free(a);
-                    return -1;
-                }
-                *outData = new_data;
-                len_old = len;
-            }
-            if (len < 0)
-            {
-                free(*outData);
-                archive_read_free(a);
-                return -1;
-            }
-            *outLen -= MEM_ADD_SIZE - len_old;
-
-            break;
-        }
-        archive_read_data_skip(a);
-    }
-
-    // 清除archive
-    if (archive_read_free(a) != ARCHIVE_OK)
-    {
-        if(*outData != NULL)
-            free(*outData);
-        return -1;
-    }
-    return 0;
-}
-
-void add_str(const char *str, mem *m, int *n)
-{
-    // 检测字符串数组是否已满
-    if(*n >= m->size)
-    {
-        m->size += 0x10;
-        m->data = realloc(m->data, m->size * sizeof(char *));
-    }
-    // 添加字符串
-    ((char**)m->data)[(*n)++] = strdup(str);
-}
-
-int getnamefromtar(const char *inData, const size_t inLen, mem *file, mem *dir)
-{
-    struct archive *a;
-    struct archive_entry *entry;
-    int file_name = 0;
-    int dir_name = 0;
-
-    // 初始化file和dir数据
-    file->data = malloc(0x10 * sizeof(char *));
-    file->size = 0x10;
-    dir->data  = malloc(0x10 * sizeof(char *));
-    dir->size  = 0x10;
-
-    // 初始化archive
-    if(!(a = archive_read_new()))
-    {
-        free(file->data);
-        free(dir->data);
+        fprintf(stderr, BRED("初始化归档文件时出现错误：%s\n"), archive_error_string(a));
         return -1;
     }
     archive_read_support_filter_all(a);
     archive_read_support_format_all(a);
 
-    // 读取数据
-    if (archive_read_open_memory(a, inData, inLen) != ARCHIVE_OK)
+    // 检查data和data->data是否为NULL
+    if (!data || !data->data)
     {
-        free(file->data);
-        free(dir->data);
+        fprintf(stderr, BRED("获取文件目录时传入参数为NULL\n"));
         archive_read_free(a);
         return -1;
     }
 
-    // 获取归档文件条目
-    while (archive_read_next_header(a, &entry) == ARCHIVE_OK)
+    // 打开归档文件
+    if (archive_read_open_memory(a, data->data, data->size) != ARCHIVE_OK)
     {
-        // 匹配成功
-        const char *name = archive_entry_pathname(entry);
-        if(name[strlen(name) - 1] == '/')
-            add_str(name, dir, &dir_name);
+        fprintf(stderr, BRED("打开归档文件时出现错误：%s\n"), archive_error_string(a));
+        archive_read_free(a);
+        return -1;
+    }
+
+    // 读取归档文件
+    int r;
+    while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK || r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
+    {
+        if (r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
+        {
+            fprintf(stderr, BRED("读取归档文件时出现警告或需要重试：%s\n"), archive_error_string(a));
+            continue;
+        }
+
+        // 获取文件或目录名
+        char *pathname = (char *)archive_entry_pathname(entry);
+        if (!pathname)
+            continue;
+        if (archive_entry_filetype(entry) == AE_IFDIR)
+            strAdd(dir, pathname, true);
         else
-            add_str(name, file, &file_name);
-        //archive_read_data_skip(a);
+            strAdd(file, pathname, true);
+        count++;
     }
 
-    dir->size = dir_name;
-    file->size = file_name;
+    // 关闭归档文件
+    archive_read_close(a);
+    archive_read_free(a);
 
-    // 清除archive
-    if (archive_read_free(a) != ARCHIVE_OK)
-    {
-        free(file->data);
-        free(dir->data);
-        return -1;
-    }
-
-    return 0;
+    return count;
 }
 
-void readlist(list **l, FILE *file)
+/**
+ * \brief 从归档文件中根据文件名获取数据
+ * \param data 归档文件数据
+ * \param file 文件名
+ * \param head 数据链表
+ * \return 成功返回true，失败返回false
+*/
+bool getdatafromarchive(struct mem *data, struct string *file, struct list **head)
 {
-    char ch = fgetc(file);
-    if(ch != '[')
-    {
-        *l = NULL;
-        return;
-    }
-    else
-    {
-        *l = (list*)malloc(sizeof(list));
-        fscanf(file, "%d %c %s\n", &(*l)->id, &ch, (*l)->name);
-        readlist(&(*l)->next, file);
-    }
-}
-void freelist(list **l)
-{
-    while (*l)
-    {
-        list *tmp = (*l)->next;
-        free(*l);
-        *l = tmp;
-    }
-}
+    size_t count = 0;
+    struct archive *a = NULL;
+    struct archive_entry *entry = NULL;
 
-int getfilefromtar(const char *post, const char *dir, const char *inData, const size_t inLen)
-{
-    struct archive *a;
-    struct archive_entry *entry;
-    size_t offset = 0;
-
-    int len     = 0;
-    char *outData = malloc(MEM_INIT_SIZE);
-
-    FILE* file = NULL;
-    char filename[256] = { 0 };
-
-    // 初始化archive
-    if(!(a = archive_read_new()))
+    // 初始化
+    a = archive_read_new();
+    if (!a)
     {
-        free(outData);
-        return -1;
+        fprintf(stderr, BRED("初始化归档文件时出现错误：%s\n"), archive_error_string(a));
+        return false;
     }
     archive_read_support_filter_all(a);
     archive_read_support_format_all(a);
 
-    // 读取数据
-    if (archive_read_open_memory(a, inData, inLen) != ARCHIVE_OK)
+    // 检查data和data->data是否为NULL
+    if (!data || !data->data)
     {
-        free(outData);
+        fprintf(stderr, BRED("获取文件数据时传入参数为NULL\n"));
         archive_read_free(a);
-        return -1;
+        return false;
     }
 
-    // 获取归档文件条目
-    while (archive_read_next_header(a, &entry) == ARCHIVE_OK)
+    // 打开归档文件
+    if (archive_read_open_memory(a, data->data, data->size) != ARCHIVE_OK)
     {
-        const char *name = archive_entry_pathname(entry);
-        // 匹配成功
-        if( (!strncmp(name, post, strlen(post))) && 
-            (name[strlen(name) - 1] != '/'))
+        fprintf(stderr, BRED("打开归档文件时出现错误：%s\n"), archive_error_string(a));
+        archive_read_free(a);
+        return false;
+    }
+
+    // 读取归档文件
+    int r;
+    while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK || r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
+    {
+        if (r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
         {
-            // 创建文件
-            strcpy(filename, dir);
-            strcat(filename, strchr(strchr(strchr(name, '/') + 1, '/') + 1, '/') + 1);
-            file = fopen(filename, "wb");
-            if(!file)
-            {
-                printf("创建文件失败:%s\n", filename);
-                free(outData);
-                archive_read_free(a);
-                break;
-            }
-            // 获取数据
-            while((len = archive_read_data(a, outData, MEM_ADD_SIZE)) > 0)
-                fwrite(outData, 1, len, file);
-            if (len < 0)
-            {
-                fclose(file);
-                remove(filename);
-                free(outData);
-                archive_read_free(a);
-                return -1;
-            }
-            // 文件为空
-            if(ftell(file) == 0)
-            {
-                fclose(file);
-                remove(filename);
-            }
-            else
-            {
-                printf("%s\t提取完成!\n", filename);
-                fclose(file);
-            }
+            fprintf(stderr, BRED("读取归档文件时出现警告或需要重试：%s\n"), archive_error_string(a));
+            continue;
         }
-        else
-            archive_read_data_skip(a);
-    }
 
-    free(outData);
-    // 清除archive
-    if (archive_read_free(a) != ARCHIVE_OK)
-        return -1;
+        // 获取文件或目录名
+        char *pathname = (char *)archive_entry_pathname(entry);
+        if ((!pathname) && (archive_entry_filetype(entry) != AE_IFMT))
+            continue;
 
-    return 0;
-}
-
-
-/* 通过名称下载文件 */
-int getfile(const char *name)
-{
-    FILE *file = NULL;
-
-    char dir[256]      = { "./lib/" };
-    char url[256]      = { 0 };
-    char *tar_post = NULL;
-    char *deb_post = NULL;
-
-    mem deb = { 0 };
-    mem tar = { 0 };
-    mem f   = { 0 };
-    mem d   = { 0 };
-
-    // 创建目录
-    mkdir(dir, 0777);
-    strcat(dir, name);
-    strcat(dir, "/");
-    mkdir(dir, 0777);
-
-    // 获取归档文件中的目录
-    if(!strcmp(&name[strlen(name) - 2], "64"))
-        tar_post = "./lib/x86_64-linux-gnu/";
-    else
-        tar_post = "./lib/i386-linux-gnu/";
-
-    // 下载文件deb文件
-    strcpy(url, GLIBC_DIR);
-    strcat(url, name);
-    strcat(url, ".deb");
-    printf("准备下载文件:%s\n", url);
-    if(getdatafromcurl(url, &deb) < 0)
-    {
-        perror("获取文件失败!\n");
-        return -1;
-    }
-    printf("成功获取文件\n");
-
-    // 获取deb条目
-    if(getnamefromtar(deb.data, deb.size, &f, &d) < 0)
-    {
-        perror("获取文件条目失败!\n");
-        FREE(deb);
-        return -1;
-    }
-    for(int i = 0; i<f.size; i++)
-    {
-        if(!strncmp(((char**)f.data)[i], "data", 4))
+        // 检查这个文件是否时自己要提取的文件
+        if (strCheckAndGet(file, pathname) == true)
         {
-            deb_post = ((char**)f.data)[i];
-            break;
+            struct mem *mem = (struct mem *)MALLOC(sizeof(struct mem));
+            mem->size = archive_entry_size(entry);
+            mem->data = (BYTE *)MALLOC(mem->size);
+            archive_read_data(a, mem->data, mem->size);
+            dataAdd(head, mem, false);
+            count++;
         }
     }
-    if(!deb_post)
-    {
-        printf("无法从%s.deb文件中获取data.tar条目\n", name);
-        FREE(deb);
-        FREE(f);
-        FREE(d);
-        return -1;
-    }
-    FREE(f);
-    FREE(d);
 
-    // 从deb中提取data
-    printf("正在从%s.deb中提取\n", name);
-    if(getdatafromtar(deb_post, (char*)deb.data, deb.size, (char**)&tar.data, &tar.size) < 0)
-    {
-        perror("提取文件失败!\n错误文件:data.tar.zst\n");
-        FREE(deb);
-        return -1;
-    }
+    // 关闭归档文件
+    archive_read_close(a);
+    archive_read_free(a);
 
-    if(getfilefromtar(tar_post, dir, (char*)tar.data, tar.size) < 0)
+    // 错误处理
+    if (strCount(file) != count)
     {
-        perror("提取错误!\n");
-        FREE(deb);
-        FREE(tar);
-        return -1;
-    }
+        fprintf(stderr, BRED("提取文件数量与文件名数量不一致!\n"));
+        fprintf(stderr, BRED("请检查需要提取的文件是否存在问题\n"));
 
-    FREE(deb);
-    FREE(tar);
-    printf("提取完成!\n");
-    return 0;
+        struct string *node = file;
+        while (node)
+        {
+            fprintf(stderr, BRED("文件名: %s\n"), node->str);
+            node = node->next;
+        }
+        return false;
+    }
+    return true;
 }

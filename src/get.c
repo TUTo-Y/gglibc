@@ -1,97 +1,173 @@
-#include "file.h"
+#include <file.h>
 
-int main(int argc, char **argv)
+/**
+ * \brief 获取glibc
+ * \param name 名称
+ * \return 是否成功
+*/
+bool getlibc(const char *name)
 {
-    list *hand = NULL;
-    list *tmp  = NULL;
-    FILE *file = NULL;
-    char str[256]   = { 0 };
-    char str2[256]  = { 0 };
+    char *s = NULL;
+    struct string *node     = NULL;
+    struct string **_node   = NULL;
 
-    Init();
-
-    // 读取list
-    file = fopen("./list.txt", "r");
-    if(file == NULL)
+    /* 创建目录 */
+    char path[PATH_MAX] =   { 0 };                                      // libc的保存路径
+    if (mkdir("glibc", 0755) == -1 && errno != EEXIST)
     {
-        perror("无法打开list.txt\n");
-        return -1;
+        fprintf(stderr, BRED("无法创建glibc目录\n"));
+        return false;
     }
-    readlist(&hand, file);
-    fclose(file);
-
-    if(hand == NULL)
+    snprintf(path, sizeof(path), "glibc/%s", name);
+    path[strlen(path) - 4] = '\0';
+    if (mkdir(path, 0755) == -1 && errno != EEXIST)
     {
-        perror("list.txt为空\n请先运行update\n");
-        return -1;
+        fprintf(stderr, BRED("无法创建glibc目录\n"));
+        return false;
+    }
+    path[strlen(path)+1] = '\0';
+    path[strlen(path)] = '/';
+    
+    /* 获取deb */
+    struct mem deb;
+    char curl[PATH_MAX] =   { 0 };
+    snprintf(curl, sizeof(curl), "%s%s", GLIBC_DIR, name);
+    printf(BYEL("准备下载文件: ") BLU("%s\n"), curl);
+    if(getdatafromcurl(curl, &deb) == false)                            // 获取deb归档文件到deb
+    {
+        fprintf(stderr, BRED("获取%s失败!\n"), curl);
+        return false;
     }
 
-    // 选择文件下载
-    if(argc <= 1)
+    /* 解析deb */
+    struct string *debpath = NULL;
+    if(getpathfromarchive(&deb, NULL, &debpath) == false)               // 解析deb目录到debpath
     {
-        // 要求用户输入
-        tmp = hand;
-        while(tmp)
+        fprintf(stderr, BRED("解析%s失败!\n"), curl);
+        FREE(deb);
+        return false;
+    }
+    _node = &debpath;
+    while(*_node != NULL)                                               // 去掉不是data的文件
+    {
+        if(!strstr((*_node)->str, "data"))
         {
-            printf("[%3d ] %s\n", tmp->id, tmp->name);
-            tmp = (list*)tmp->next;
+            free(strGet(_node));
+            continue;
         }
-        printf("你也可以选择:all\n> ");
-        scanf("%s", str);
-        sprintf(str2, "%s", str);
+        _node = &(*_node)->next;
+    }
+    if(!strstr(debpath->str, "data"))                                    // 未找到data
+    {
+        fprintf(stderr, BRED("解析%s失败：未找到data文件\n"), curl);
+        FREE(deb);
+        strFree(&debpath);
+        return false;
+    }
+
+    /* 提取libc */
+    char   libcpath[PATH_MAX] = { 0 };                                      // data中libc的路径
+    struct mem libc;
+    struct list *list = NULL;
+    if(getdatafromarchive(&deb, debpath, &list) == false)                   // 从deb中提取data到libc
+    {
+        fprintf(stderr, BRED("提取%s失败!\n"), debpath->str);
+        FREE(deb);
+        strFree(&debpath);
+        return false;
+    }
+    if(list == NULL)                                                        // 未找到data提取失败
+    {
+        fprintf(stderr, BRED("提取%s失败!\n"), debpath->str);
+        FREE(deb);
+        strFree(&debpath);
+        return false;
+    }
+    libc.data = list->m->data;
+    libc.size = list->m->size;
+    free(list->m);                                                          // 清除无用的数据
+    free(list);
+    list = NULL;
+    FREE(deb);
+    strFree(&debpath);
+    if(getpathfromarchive(&libc, NULL, &debpath) == false)                  // 解析data到debpath
+    {
+        fprintf(stderr, BRED("解析data失败!\n"));
+        FREE(libc);
+        return false;
+    }
+    node = debpath;
+    while(node)
+    {
+        if((s = strstr(node->str, "libc-")) || (s = strstr(node->str, "libc.so.6")))
+        {
+            strncpy(libcpath, node->str, s - node->str);
+            break;
+        }
+        node = node->next;
+    }
+    if(libcpath[0] == '\0')                                             // 未找到libc
+    {
+        fprintf(stderr, BRED("解析data失败, 没有找到glibc文件\n"));
+        FREE(libc);
+        strFree(&debpath);
+        return false;
+    }
+    printf("目录:%s\n", libcpath);
+    _node = &debpath;                                                   // 删除所有目录不在libc下的文件
+    while(*_node != NULL)
+    {
+        if(strncmp((*_node)->str, libcpath, strlen(libcpath)))
+        {
+            free(strGet(_node));
+            continue;
+        }
+        if(strchr((*_node)->str + strlen(libcpath), '/'))
+        {
+            free(strGet(_node));
+            continue;
+        }
+        _node = &(*_node)->next;
+    }
+    // 解压文件数据
+    if(getdatafromarchive(&libc, debpath, &list) == false)              // 解压libc到path
+    {
+        fprintf(stderr, BRED("获取glibc文件失败!\n"));
+        FREE(libc);
+        strFree(&debpath);
+        return false;
+    }
+    FREE(libc);
+    if(list == NULL)                                                    // 未找到libc提取失败
+    {
+        fprintf(stderr, BRED("获取glibc文件失败!\n"));
+        FREE(libc);
+        strFree(&debpath);
+        return false;
+    }
+
+    /* 写入对应的文件 */
+    while(s = strGet(&debpath))
+    {
+        char sopath[PATH_MAX] = { 0 };
+        snprintf(sopath, sizeof(sopath), "%s%s", path, s+strlen(libcpath)); // 计算目录
         
-        // 全部下载
-        if(!strcmp(str, "all"))
-            goto ALL;
+        FILE *fp = fopen(sopath, "wb");                                     // 写入文件
+        if(fp == NULL)
+        {
+            fprintf(stderr, BRED("忽略 : 无法创建文件%s\n"), sopath);
+            FREE(*dataGet(&list));
+            continue;
+        }
 
-        // 通过输入的字符串或者序号获取文件
-        tmp = hand;
-        while(tmp)
-        {
-            if((!strncmp(tmp->name, str2, strlen(tmp->name))) || (tmp->id == atoi(str)))
-            {
-                getfile(tmp->name);
-                break;
-            }
-            else
-                tmp = (list*)tmp->next;
-        }
-    }
-    // 全部下载
-    else if(!strcmp("all", argv[1]))
-    {
-ALL:
-        tmp = hand;
-        while(tmp)
-        {
-            getfile(tmp->name);
-            tmp = (list*)tmp->next;
-        }
-    }
-    // 输入序号或者字符串
-    else
-    {
-        // 通过输入的字符串或者序号获取文件
-        for(int i = 1; i<argc; i++)
-        {
-            tmp = hand;
-            while(tmp)
-            {
-                if((!strcmp(tmp->name, argv[i])) || (tmp->id == atoi(argv[i])))
-                {
-                    getfile(tmp->name);
-                    break;
-                }
-                else
-                    tmp = (list*)tmp->next;
-            }
-            if(!tmp)
-                printf("未知参数:%s\n", argv[i]);
-        }
+        struct mem *tmp = NULL;
+        tmp = dataGet(&list);
+        fwrite(tmp->data, 1, tmp->size, fp);
+        FREE(*tmp);
+
+        fclose(fp);
+        printf(BGRN("成功写入文件: ") GRN("%s\n"), sopath);
     }
 
-    // 释放链表
-    freelist(&hand);
-    Quit();
-    return 0;
+    return true;
 }

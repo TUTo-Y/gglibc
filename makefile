@@ -6,14 +6,11 @@ HANDLE	=	$(wildcard $(INCDIR)/*.h)
 CFLAGS	=	-I./include
 CFLAGS	+=	-lcurl -lz -larchive -lm
 
-all:get update
+all : gglibc
 
-get		:$(filter-out $(SRCDIR)/update.c,	$(SOURCE)) $(HANDLE)
-	gcc -o $@ $^ $(CFLAGS)
-update	:$(filter-out $(SRCDIR)/get.c,		$(SOURCE)) $(HANDLE)
+gglibc : $(SOURCE) $(HANDLE)
 	gcc -o $@ $^ $(CFLAGS)
 
 rm:clean
 clean:
-	rm ./get
-	rm ./update
+	rm ./gglibc
