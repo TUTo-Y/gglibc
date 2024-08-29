@@ -139,6 +139,10 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
                 // 找到同目录文件
                 if (!strncmp(pathname, libcPath, strlen(libcPath)))
                 {
+                    // 不用子目录
+                    if(strstr(pathname + strlen(libcPath), "/"))
+                        continue;
+
                     // 创建文件
                     char file[2048];
                     strcpy(file, path);
