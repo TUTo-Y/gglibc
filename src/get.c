@@ -1,173 +1,183 @@
-#include <file.h>
+#include "get.h"
 
-/**
- * \brief 获取glibc
- * \param name 名称
- * \return 是否成功
-*/
-bool getlibc(const char *name)
+bool getlibc(const char *cwd, const config *conf, const char *libc)
 {
-    char *s = NULL;
-    struct string *node     = NULL;
-    struct string **_node   = NULL;
+    bool ret = true;
+    // 创建目录
+    char path[1024];
+    strcpy(path, cwd);
+    strcat(path, "/");
+    strncat(path, libc, strlen(libc) - 4);
 
-    /* 创建目录 */
-    char path[PATH_MAX] =   { 0 };                                      // libc的保存路径
-    if (mkdir("glibc", 0755) == -1 && errno != EEXIST)
+    // 创建目录
+    if (mkdir(path, 0755) != 0 && errno != EEXIST)
     {
-        fprintf(stderr, BRED("无法创建glibc目录\n"));
-        return false;
-    }
-    snprintf(path, sizeof(path), "glibc/%s", name);
-    path[strlen(path) - 4] = '\0';
-    if (mkdir(path, 0755) == -1 && errno != EEXIST)
-    {
-        fprintf(stderr, BRED("无法创建glibc目录\n"));
-        return false;
-    }
-    path[strlen(path)+1] = '\0';
-    path[strlen(path)] = '/';
-    
-    /* 获取deb */
-    struct mem deb;
-    char curl[PATH_MAX] =   { 0 };
-    snprintf(curl, sizeof(curl), "%s%s", GLIBC_DIR, name);
-    printf(BYEL("准备下载文件: ") BLU("%s\n"), curl);
-    if(getdatafromcurl(curl, &deb) == false)                            // 获取deb归档文件到deb
-    {
-        fprintf(stderr, BRED("获取%s失败!\n"), curl);
+        ERR("无法创建目录\n");
         return false;
     }
 
-    /* 解析deb */
-    struct string *debpath = NULL;
-    if(getpathfromarchive(&deb, NULL, &debpath) == false)               // 解析deb目录到debpath
+    // 下载文件
+    mem *m = NULL;
+    char url[2048]; // 增加缓冲区大小
+    snprintf(url, sizeof(url), "%s/pool/main/g/glibc/%s", conf->listCurl, libc);
+    if (webGet(url, &m) == false)
     {
-        fprintf(stderr, BRED("解析%s失败!\n"), curl);
-        FREE(deb);
+        ERR("无法下载文件\n");
         return false;
     }
-    _node = &debpath;
-    while(*_node != NULL)                                               // 去掉不是data的文件
+
+    // 解压第一层
+    struct archive *a = archive_read_new();
+    archive_read_support_filter_all(a);
+    archive_read_support_format_all(a);
+    if (archive_read_open_memory(a, m->m, m->size) != ARCHIVE_OK)
     {
-        if(!strstr((*_node)->str, "data"))
+        ERR("打开归档文件时出现错误：%s\n", archive_error_string(a));
+        archive_read_free(a);
+        ret = false;
+        goto error1;
+    }
+    struct archive_entry *entry = NULL;
+    int r;
+    while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK || r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
+    {
+        if (r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
         {
-            free(strGet(_node));
+            ERR("读取归档文件时出现警告或需要重试：%s\n", archive_error_string(a));
             continue;
         }
-        _node = &(*_node)->next;
-    }
-    if(!strstr(debpath->str, "data"))                                    // 未找到data
-    {
-        fprintf(stderr, BRED("解析%s失败：未找到data文件\n"), curl);
-        FREE(deb);
-        strFree(&debpath);
-        return false;
-    }
 
-    /* 提取libc */
-    char   libcpath[PATH_MAX] = { 0 };                                      // data中libc的路径
-    struct mem libc;
-    struct list *list = NULL;
-    if(getdatafromarchive(&deb, debpath, &list) == false)                   // 从deb中提取data到libc
-    {
-        fprintf(stderr, BRED("提取%s失败!\n"), debpath->str);
-        FREE(deb);
-        strFree(&debpath);
-        return false;
-    }
-    if(list == NULL)                                                        // 未找到data提取失败
-    {
-        fprintf(stderr, BRED("提取%s失败!\n"), debpath->str);
-        FREE(deb);
-        strFree(&debpath);
-        return false;
-    }
-    libc.data = list->m->data;
-    libc.size = list->m->size;
-    free(list->m);                                                          // 清除无用的数据
-    free(list);
-    list = NULL;
-    FREE(deb);
-    strFree(&debpath);
-    if(getpathfromarchive(&libc, NULL, &debpath) == false)                  // 解析data到debpath
-    {
-        fprintf(stderr, BRED("解析data失败!\n"));
-        FREE(libc);
-        return false;
-    }
-    node = debpath;
-    while(node)
-    {
-        if((s = strstr(node->str, "libc-")) || (s = strstr(node->str, "libc.so.6")))
+        // 获取文件或目录名
+        char *pathname = (char *)archive_entry_pathname(entry);
+        if ((!pathname) && (archive_entry_filetype(entry) != AE_IFMT))
+            continue;
+
+        // 检查这个文件是否时自己要提取的文件
+        if (strstr(pathname, "data"))
         {
-            strncpy(libcpath, node->str, s - node->str);
+            char libcPath[1024] = {0};
+
+            // 提取data
+            mem *data = Malloc(archive_entry_size(entry));
+            archive_read_data(a, data->m, data->size);
+
+            // 获取文件目录
+            struct archive *a = archive_read_new();
+            archive_read_support_filter_all(a);
+            archive_read_support_format_all(a);
+            if (archive_read_open_memory(a, data->m, data->size) != ARCHIVE_OK)
+            {
+                ERR("打开归档文件时出现错误：%s\n", archive_error_string(a));
+                archive_read_free(a);
+                ret = false;
+                goto error1;
+            }
+            struct archive_entry *entry = NULL;
+            int r;
+            while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK || r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
+            {
+                if (r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
+                {
+                    ERR("读取归档文件时出现警告或需要重试：%s\n", archive_error_string(a));
+                    continue;
+                }
+
+                // 获取文件或目录名
+                char *pathname = (char *)archive_entry_pathname(entry);
+                if ((!pathname) && (archive_entry_filetype(entry) != AE_IFMT))
+                    continue;
+
+                // 搜索glibc文件
+                char *s;
+                if ((s = strstr(pathname, "libc-")) ||
+                    (s = strstr(pathname, "libc.so.6")))
+                {
+                    strncpy(libcPath, pathname, s - pathname);
+                    break;
+                }
+            }
+            // 关闭归档文件
+            archive_read_close(a);
+            archive_read_free(a);
+
+            // 检查是否找到glibc文件
+            if (libcPath[0] == '\0')
+            {
+                ERR("解析data失败, 没有找到glibc文件\n");
+                Free(data);
+                ret = false;
+                goto error2;
+            }
+
+            // 提取所有文件
+            a = archive_read_new();
+            archive_read_support_filter_all(a);
+            archive_read_support_format_all(a);
+            if (archive_read_open_memory(a, data->m, data->size) != ARCHIVE_OK)
+            {
+                ERR("打开归档文件时出现错误：%s\n", archive_error_string(a));
+                archive_read_free(a);
+                ret = false;
+                goto error1;
+            }
+            entry = NULL;
+            while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK || r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
+            {
+                if (r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
+                {
+                    ERR("读取归档文件时出现警告或需要重试：%s\n", archive_error_string(a));
+                    continue;
+                }
+
+                // 获取文件或目录名
+                char *pathname = (char *)archive_entry_pathname(entry);
+                if ((!pathname) && (archive_entry_filetype(entry) != AE_IFMT))
+                    continue;
+                if (archive_entry_filetype(entry) == AE_IFDIR)
+                    continue;
+
+                // 找到同目录文件
+                if (!strncmp(pathname, libcPath, strlen(libcPath)))
+                {
+                    // 创建文件
+                    char file[2048];
+                    strcpy(file, path);
+                    strcat(file, "/");
+                    strcat(file, pathname + strlen(libcPath));
+
+                    FILE *f = fopen(file, "wb");
+                    if (f == NULL)
+                    {
+                        ERR("无法创建文件: %s\n", file);
+                        continue;
+                    }
+
+                    // 写入文件
+                    mem *data = Malloc(archive_entry_size(entry));
+                    archive_read_data(a, data->m, data->size);
+                    fwrite(data->m, 1, data->size, f);
+                    fclose(f);
+                    Free(data);
+
+                    // 修改权限
+                    chmod(file, 0755);
+                }
+            }
+            // 关闭归档文件
+            archive_read_close(a);
+            archive_read_free(a);
+
+            Free(data);
+
             break;
         }
-        node = node->next;
     }
-    if(libcpath[0] == '\0')                                             // 未找到libc
-    {
-        fprintf(stderr, BRED("解析data失败, 没有找到glibc文件\n"));
-        FREE(libc);
-        strFree(&debpath);
-        return false;
-    }
-    printf("目录:%s\n", libcpath);
-    _node = &debpath;                                                   // 删除所有目录不在libc下的文件
-    while(*_node != NULL)
-    {
-        if(strncmp((*_node)->str, libcpath, strlen(libcpath)))
-        {
-            free(strGet(_node));
-            continue;
-        }
-        if(strchr((*_node)->str + strlen(libcpath), '/'))
-        {
-            free(strGet(_node));
-            continue;
-        }
-        _node = &(*_node)->next;
-    }
-    // 解压文件数据
-    if(getdatafromarchive(&libc, debpath, &list) == false)              // 解压libc到path
-    {
-        fprintf(stderr, BRED("获取glibc文件失败!\n"));
-        FREE(libc);
-        strFree(&debpath);
-        return false;
-    }
-    FREE(libc);
-    if(list == NULL)                                                    // 未找到libc提取失败
-    {
-        fprintf(stderr, BRED("获取glibc文件失败!\n"));
-        FREE(libc);
-        strFree(&debpath);
-        return false;
-    }
+error2:
+    // 关闭归档文件
+    archive_read_close(a);
+    archive_read_free(a);
 
-    /* 写入对应的文件 */
-    while(s = strGet(&debpath))
-    {
-        char sopath[PATH_MAX] = { 0 };
-        snprintf(sopath, sizeof(sopath), "%s%s", path, s+strlen(libcpath)); // 计算目录
-        
-        FILE *fp = fopen(sopath, "wb");                                     // 写入文件
-        if(fp == NULL)
-        {
-            fprintf(stderr, BRED("忽略 : 无法创建文件%s\n"), sopath);
-            FREE(*dataGet(&list));
-            continue;
-        }
-
-        struct mem *tmp = NULL;
-        tmp = dataGet(&list);
-        fwrite(tmp->data, 1, tmp->size, fp);
-        FREE(*tmp);
-
-        fclose(fp);
-        printf(BGRN("成功写入文件: ") GRN("%s\n"), sopath);
-    }
-
-    return true;
+error1:
+    Free(m);
+    return ret;
 }

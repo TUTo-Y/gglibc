@@ -1,34 +1,63 @@
-#ifndef _UPDATE_H
-#define _UPDATE_H
+/**
+ * 更新列表
+ */
+#ifndef UPDATE_H
+#define UPDATE_H
 
-#include <file.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
 
-extern struct string *ls_libc;
-extern struct string *ls_libc_dbg;
+#include "gz.h"
+#include "web.h"
+#include "list.h"
+#include "user.h"
+#include "config.h"
 
 /**
- * \brief 写入文件信息到list
- * \return 是否成功
-*/
-bool putscontenttolist();
+ * \brief 解析ls-lR文件
+ * \param str ls-lR文件内容
+ * \param libc libc列表
+ * \param libc_dbg libc符号列表
+ * \return 成功返回true，失败返回false
+ */
+bool parse(const char *str, list *libc, list *libc_dbg);
 
 /**
- * \brief 从list读取文件信息
- * \return 是否成功
-*/
-bool getcontentfromlist();
+ * \brief 获取list从URL
+ * \param url 源网址地址
+ * \param libc libc列表
+ * \param libc_dbg libc符号列表
+ * \return 成功返回true，失败返回false
+ */
+bool list_from_url(const char *url, list *libc, list *libc_dbg);
 
 /**
- * \brief 从ls中获取文件信息
- * \param str 字符串
- * \return 是否成功
-*/
-bool getcontenttolsfile(const char *str);
+ * \brief 获取list从文件
+ * \param file 文件名
+ * \param libc libc列表
+ * \param libc_dbg libc符号列表
+ * \return 成功返回true，失败返回false
+ */
+bool list_from_file(const char *file, list *libc, list *libc_dbg);
 
 /**
- * \brief 更新数据
- * \return 是否成功
-*/
-bool update();
+ * \brief 写入list到文件
+ * \param file 文件名
+ * \param libc libc列表
+ * \param libc_dbg libc符号列表
+ * \return 成功返回true，失败返回false
+ */
+bool list_to_file(const char *file, list *libc, list *libc_dbg);
 
-#endif  // _UPDATE_H
+/**
+ * \brief 更新列表
+ * \param conf 配置
+ * \param libc libc列表
+ * \param libc_sym libc符号列表
+ * \return 成功返回true，失败返回false
+ */
+bool list_update(const config *conf, list *libc, list *libc_sym);
+
+#endif // UPDATE_H

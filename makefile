@@ -5,7 +5,7 @@ SOURCE	=	$(wildcard $(SRCDIR)/*.c)
 HANDLE	=	$(wildcard $(INCDIR)/*.h)
 CFLAGS	=	-I./include
 CFLAGS	+=	-lcurl -lz -larchive -lm
-
+CFLAGS  +=  -D_DEBUG
 all : gglibc
 
 gglibc : $(SOURCE) $(HANDLE)
