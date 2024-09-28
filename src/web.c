@@ -16,7 +16,7 @@ static size_t processcallback(void *p, curl_off_t dltotal, curl_off_t dlnow, cur
 {
     if (dltotal)
     {
-        printf(BBLU("\r正在下载 : %5.2f%%"), (double)dlnow / (double)dltotal * 100);
+        DEBUG(BBLU("\r正在下载 : %5.2f%%"), (double)dlnow / (double)dltotal * 100);
         fflush(stdout);
     }
     return 0;
@@ -38,7 +38,7 @@ bool webGet(const char *url, mem **data)
     // 初始化curl
     if (!(curl = curl_easy_init()))
     {
-        ERR("初始化CURL时出现错误");
+        ERROR("初始化CURL时出现错误");
         return false;
     }
 
@@ -49,8 +49,7 @@ bool webGet(const char *url, mem **data)
     res = curl_easy_setopt(curl, CURLOPT_URL, url);
     if (res != CURLE_OK)
     {
-        fprintf(stderr, BRED("设置CURL时出现错误: %s\n"),
-                curl_easy_strerror(res));
+        ERROR("设置CURL时出现错误: %s", curl_easy_strerror(res));
         curl_easy_cleanup(curl);
         Free(*data);
         return false;
@@ -77,7 +76,7 @@ bool webGet(const char *url, mem **data)
     fflush(stdout);
     if (curl_easy_perform(curl) != CURLE_OK)
     {
-        ERR("\n下载%s错误\n", url);
+        ERROR("\n下载%s错误: %s\n", url, curl_easy_strerror(res));
         fflush(stdout);
 
         // 清除curl
@@ -89,7 +88,7 @@ bool webGet(const char *url, mem **data)
     // 清除curl
     curl_easy_cleanup(curl);
 
-    printf(BGRN("\r下载%s完成\n"), url);
+    SUCESS("\r下载%s完成\n", url);
     fflush(stdout);
     return true;
 }

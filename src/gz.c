@@ -25,7 +25,7 @@ bool gz(const mem *in, mem **out)
     // 初始化解压缩
     if (inflateInit2(&strm, 16 + MAX_WBITS) != Z_OK)
     {
-        ERR("初始化zlib时失败");
+        ERROR("初始化zlib时失败");
         Free(*out);
         return false;
     }
@@ -44,14 +44,14 @@ bool gz(const mem *in, mem **out)
 
         // 解压缩
         int ret = inflate(&strm, Z_NO_FLUSH);
-        printf(BBLU("\r正在解压 : %5.2f%%"), (1.0 - (double)strm.avail_in / (double)in->size) * 100);
+        DEBUG(BBLU("\r正在解压 : %5.2f%%"), (1.0 - (double)strm.avail_in / (double)in->size) * 100);
         fflush(stdout);
 
         if (ret == Z_STREAM_END)
             break;
         if (ret != Z_OK)
         {
-            ERR("解压时出现错误 : %s", strm.msg);
+            ERROR("解压时出现错误 : %s", strm.msg);
             inflateEnd(&strm);
             Free(*out);
             return false;
@@ -59,7 +59,7 @@ bool gz(const mem *in, mem **out)
     }
     (*out)->size = strm.total_out;
 
-    printf(BGRN("\r解压完成              \n"));
+    SUCESS("\r解压完成              \n");
 
     inflateEnd(&strm);
     return true;

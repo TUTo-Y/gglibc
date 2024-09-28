@@ -16,107 +16,187 @@
 #include "update.h"
 #include "get.h"
 
-void ch_get(const char *cwd, const config *conf, list *libc)
+#if 1
+/**
+ * \brief 递归创建多层目录
+ * \param path 要创建的目录路径
+ * \param mode 目录权限
+ * \return 成功返回0，失败返回-1
+ */
+int mkdir_p(const char *path, mode_t mode)
 {
-    list *node = libc->fd;
-
-    // 输出菜单
-    printf(BCYN("[  0 ] 返回\n"));
-    for (int i = 1; node != libc; i++)
+    char *temp_path = strdup(path);
+    if (temp_path == NULL)
     {
-        printf(BCYN("[%3d ] %s\n"), i, (char *)node->data);
-        node = node->fd;
+        perror("strdup");
+        return -1;
     }
 
-    // 选择
-    int choice = 0;
-    printf(BWHT("请选择: "));
-    scanf("%d", &choice);
-    if (choice <= 0 || choice > listGetCount(libc))
-        return;
+    char *p = temp_path;
+    while (*p != '\0')
+    {
+        if (*p == '/')
+        {
+            *p = '\0';
+            if (strlen(temp_path) > 0 && mkdir(temp_path, mode) != 0 && errno != EEXIST)
+            {
+                perror("mkdir");
+                free(temp_path);
+                return -1;
+            }
+            *p = '/';
+        }
+        p++;
+    }
 
-    // 下载对应的文件
-    node = libc->fd;
-    for (int i = 1; i < choice; i++)
-        node = node->fd;
+    if (mkdir(temp_path, mode) != 0 && errno != EEXIST)
+    {
+        perror("mkdir");
+        free(temp_path);
+        return -1;
+    }
 
-    // printf("选择%s\n", (char*)node->data);
-    if(getlibc(cwd, conf, (char *)node->data) == false)
-        printf(BRED("下载失败\n"));
-    else
-        printf(BGRN("下载成功\n"));
+    free(temp_path);
+    return 0;
 }
+
+/**
+ * \brief 创建文件，如果目录不存在则先依次创建目录
+ * \param path 文件路径
+ * \return 成功返回文件指针，失败返回NULL
+ */
+FILE *createFile(const char *path)
+{
+    // 创建文件
+    FILE *fp = fopen(path, "wb");
+    if (fp == NULL)
+    {
+        // 提取目录路径
+        char *dir_path = strdup(path);
+        if (dir_path == NULL)
+        {
+            perror("strdup");
+            return NULL;
+        }
+
+        char *last_slash = strrchr(dir_path, '/');
+        if (last_slash != NULL)
+        {
+            *last_slash = '\0';
+            // 创建目录
+            if (mkdir_p(dir_path, 0755) != 0)
+            {
+                free(dir_path);
+                return NULL;
+            }
+        }
+
+        free(dir_path);
+
+        // 创建文件
+        fp = fopen(path, "wb");
+        if (fp == NULL)
+        {
+            perror("fopen");
+            return NULL;
+        }
+    }
+
+    return fp;
+}
+
+int main()
+{
+    const char *path = "/home/tuto/github/gglibc/a/b/c/d/file.txt";
+
+    FILE *fp = createFile(path);
+    if (fp != NULL)
+    {
+        printf("文件 %s 创建成功\n", path);
+        fclose(fp);
+    }
+    else
+    {
+        printf("文件 %s 创建失败\n", path);
+    }
+
+    return 0;
+}
+
+#else
 
 int main(char argc, char *argv[])
 {
     setlocale(LC_ALL, "zh_CN.UTF-8");
 
-    char cwd[1024];
+    // 获取当前目录
+    char cwd[PATH_MAX];
     getcwd(cwd, sizeof(cwd));
 
+    // 读取配置
     config conf;
     confInit(&conf);
 
     list libc;
-    list libc_dbg;
     listInitList(&libc);
-    listInitList(&libc_dbg);
 
     // 检查是否更新
-    if (argc == 2 && (!strcmp(argv[1], "update") || !strcmp(argv[1], "u") || !strcmp(argv[1], "-u")))
+    if (argc == 2 && (strchr(argv[1], 'u') || strchr(argv[1], 'U')))
     {
-        if (list_update(&conf, &libc, &libc_dbg) == true)
+        if (list_update(&conf, &libc) == false)
         {
-            printf(BGRN("更新成功\n"));
             listDeleteList(&libc, free);
-            listDeleteList(&libc_dbg, free);
-            return 0;
-        }
-        ERR("无法更新glibc列表");
-        listDeleteList(&libc, free);
-        listDeleteList(&libc_dbg, free);
-        return 1;
-    }
-
-    // 读取列表
-    if (list_from_file(conf.listFile, &libc, &libc_dbg) == false)
-    {
-        if (list_update(&conf, &libc, &libc_dbg) == false)
-        {
-            ERR("无法更新glibc列表");
             return 1;
         }
     }
+    else
+    {
+        if (list_from_file(conf.listFile, &libc) == false)
+        {
+            if (list_update(&conf, &libc) == false)
+            {
+                listDeleteList(&libc, free);
+                return 1;
+            }
+        }
+    }
 
-    // 目录
     int quit = 1;
     while (quit)
     {
+        list *node = libc.fd;
+        for (int i = listGetCount(&libc); node != &libc; i--, node = node->fd)
+            DEBUG(BCYN("[ %2d ] %s\n"), i, (char *)node->data);
+        DEBUG(BCYN("[  0 ] 退出\n"));
+        DEBUG(BYEL("请输入选择 : "));
+
         int choice = 0;
-        // 打印菜单
-        printf(BCYN("0. 退出\n"));
-        printf(BCYN("1. 获取libc\n"));
-        printf(BCYN("2. 获取libc-dbg\n"));
-        printf(BWHT("请选择: "));
-        scanf("%d", &choice);
-        switch (choice)
+        if (scanf("%d", &choice) == 1)
         {
-        case 0:
-            quit = 0;
-            break;
-        case 1:
-            ch_get(cwd, &conf, &libc);
-            break;
-        case 2:
-            ch_get(cwd, &conf, &libc_dbg);
-            break;
-        default:
-            printf(BRED("无效的选择\n"));
-            putchar('\n');
+            if (choice == 0)
+                quit = 0;
+            else if (choice > 0 && choice <= listGetCount(&libc))
+            {
+                node = libc.fd;
+                for (int i = 1; i < choice; i++)
+                    node = node->fd;
+                if (getlibc(cwd, &conf, (char *)node->data) == false)
+                {
+                    ERROR("下载失败\n");
+                    DEBUG(BYEL("按任意键继续\n"));
+                    pause();
+                }
+                else
+                {
+                    SUCESS("下载成功\n");
+                    DEBUG(BYEL("按任意键继续\n"));
+                    pause();
+                }
+            }
         }
     }
 
     listDeleteList(&libc, free);
-    listDeleteList(&libc_dbg, free);
     return 0;
 }
+#endif

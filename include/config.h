@@ -39,17 +39,9 @@
 #define BCYN(str)   "\x1B[96m" str RESET    // 亮青色
 #define BWHT(str)   "\x1B[97m" str RESET    // 亮白色
 
-#ifdef _DEBUG
-#define ERR(...) fprintf(stderr, _BRED __VA_ARGS__), fprintf(stderr, RESET);
+#define ERROR(...) fprintf(stderr, _BRED __VA_ARGS__), fprintf(stderr, RESET);
 #define DEBUG(...) fprintf(stdout, __VA_ARGS__)
-#define DEB(...) __VA_ARGS__
-#define REL(...)
-#else
-#define ERR(...)
-#define DEBUG(...)
-#define DEB(...)
-#define REL(...) __VA_ARGS__
-#endif
+#define SUCESS(...) fprintf(stdout, _BGRN __VA_ARGS__), fprintf(stdout, RESET);
 
 #define GGLIBC_VERSION  "gglibc-3.0"
 

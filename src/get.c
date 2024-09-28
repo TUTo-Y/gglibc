@@ -12,7 +12,7 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
     // 创建目录
     if (mkdir(path, 0755) != 0 && errno != EEXIST)
     {
-        ERR("无法创建目录\n");
+        ERROR("无法创建目录\n");
         return false;
     }
 
@@ -22,7 +22,7 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
     snprintf(url, sizeof(url), "%s/pool/main/g/glibc/%s", conf->listCurl, libc);
     if (webGet(url, &m) == false)
     {
-        ERR("无法下载文件\n");
+        ERROR("无法下载文件\n");
         return false;
     }
 
@@ -32,7 +32,7 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
     archive_read_support_format_all(a);
     if (archive_read_open_memory(a, m->m, m->size) != ARCHIVE_OK)
     {
-        ERR("打开归档文件时出现错误：%s\n", archive_error_string(a));
+        ERROR("打开归档文件时出现错误：%s\n", archive_error_string(a));
         archive_read_free(a);
         ret = false;
         goto error1;
@@ -43,7 +43,7 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
     {
         if (r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
         {
-            ERR("读取归档文件时出现警告或需要重试：%s\n", archive_error_string(a));
+            ERROR("读取归档文件时出现警告或需要重试：%s\n", archive_error_string(a));
             continue;
         }
 
@@ -67,7 +67,7 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
             archive_read_support_format_all(a);
             if (archive_read_open_memory(a, data->m, data->size) != ARCHIVE_OK)
             {
-                ERR("打开归档文件时出现错误：%s\n", archive_error_string(a));
+                ERROR("打开归档文件时出现错误：%s\n", archive_error_string(a));
                 archive_read_free(a);
                 ret = false;
                 goto error1;
@@ -78,7 +78,7 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
             {
                 if (r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
                 {
-                    ERR("读取归档文件时出现警告或需要重试：%s\n", archive_error_string(a));
+                    ERROR("读取归档文件时出现警告或需要重试：%s\n", archive_error_string(a));
                     continue;
                 }
 
@@ -103,7 +103,7 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
             // 检查是否找到glibc文件
             if (libcPath[0] == '\0')
             {
-                ERR("解析data失败, 没有找到glibc文件\n");
+                ERROR("解析data失败, 没有找到glibc文件\n");
                 Free(data);
                 ret = false;
                 goto error2;
@@ -115,17 +115,19 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
             archive_read_support_format_all(a);
             if (archive_read_open_memory(a, data->m, data->size) != ARCHIVE_OK)
             {
-                ERR("打开归档文件时出现错误：%s\n", archive_error_string(a));
+                ERROR("打开归档文件时出现错误：%s\n", archive_error_string(a));
                 archive_read_free(a);
                 ret = false;
                 goto error1;
             }
+
+            
             entry = NULL;
             while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK || r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
             {
                 if (r == ARCHIVE_WARN || r == ARCHIVE_RETRY)
                 {
-                    ERR("读取归档文件时出现警告或需要重试：%s\n", archive_error_string(a));
+                    ERROR("读取归档文件时出现警告或需要重试：%s\n", archive_error_string(a));
                     continue;
                 }
 
@@ -152,7 +154,7 @@ bool getlibc(const char *cwd, const config *conf, const char *libc)
                     FILE *f = fopen(file, "wb");
                     if (f == NULL)
                     {
-                        ERR("无法创建文件: %s\n", file);
+                        ERROR("无法创建文件: %s\n", file);
                         continue;
                     }
 

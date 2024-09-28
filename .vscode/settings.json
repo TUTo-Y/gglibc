@@ -21,7 +21,11 @@
         "unistd.h": "c",
         "chardet-config.h": "c",
         "stdlib.h": "c",
-        "archive.h": "c"
+        "archive.h": "c",
+        "gz.h": "c",
+        "mem.h": "c",
+        "get.h": "c",
+        "user.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }
