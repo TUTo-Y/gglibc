@@ -126,8 +126,7 @@ bool list_from_file(const char *file, list *libc)
     char path[PATH_MAX] = {0};
     while (!feof(fp))
     {
-        fscanf(fp, "%s", path);
-        if(strstr(path, "libc"))
+        if(fscanf(fp, "%s", path) == 1)
             listAddNodeInEnd(libc, listDataToNode(listCreateNode(), path, strlen(path) + 1, true));
     }
     fclose(fp);

@@ -18,16 +18,17 @@
 #include "gz.h"
 #include "web.h"
 #include "mem.h"
+#include "file.h"
 #include "user.h"
 #include "list.h"
 #include "config.h"
 
 /**
  * \brief 获取libc
- * \param cwd 当前目录
  * \param conf 配置
+ * \param cwd 当前目录
  * \param libc libc文件名
  */
-bool getlibc(const char *cwd, const config *conf, const char *libc);
+bool getlibc(const config *conf, const char *cwd , const char *libc);
 
 #endif // GET_H
