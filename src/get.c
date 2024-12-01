@@ -115,7 +115,7 @@ bool _getlibc(const config *conf, const char *dir, const char *libc)
             // 创建文件
             char file[PATH_MAX];
             strcpy(file, dir);
-            strcat(file, filename);
+            strcat(file, filename + 1);
 
             FILE *f = createFile(file);
             if (f == NULL)
